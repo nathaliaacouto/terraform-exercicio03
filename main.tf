@@ -34,14 +34,9 @@ output "eks_cluster_ca_certificate" {
   value = data.aws_eks_cluster.my_eks.certificate_authority[0].data
 }
 
-# Referenciando o EKS Cluster existente
-data "aws_eks_cluster" "my_eks" {
-  name = "EKSDeepDive"
-}
-
 # Referenciar o Role que será usado pelo Node Group
 data "aws_iam_role" "node_role" {
-  name = "eks-node-role" # Substitua pelo nome da Role adequada para o Node Group
+  name = "EKSDeepDive_NodeGroup_Role_cdcp"
 }
 
 # Criar Node Group
@@ -67,4 +62,76 @@ resource "aws_eks_node_group" "node_group_dupla" {
   tags = {
     Name = "nodeGroupNumeroDaDupla"
   }
+}
+
+# Configuração do Provider Kubernetes (usando o EKS como cluster)
+provider "kubernetes" {
+  host                   = data.aws_eks_cluster.my_eks.endpoint
+  cluster_ca_certificate = base64decode(data.aws_eks_cluster.my_eks.certificate_authority[0].data)
+  token                  = data.aws_eks_cluster_auth.my_eks.token
+}
+
+# Referenciar o Deployment de WordPress no ECR Público
+resource "kubernetes_deployment" "wordpress_deployment" {
+  metadata {
+    name      = "wordpress"
+    namespace = "default"
+    labels = {
+      app = "wordpress"
+    }
+  }
+
+  spec {
+    replicas = 2
+
+    selector {
+      match_labels = {
+        app = "wordpress"
+      }
+    }
+
+    template {
+      metadata {
+        labels = {
+          app = "wordpress"
+        }
+      }
+
+      spec {
+        container {
+          name  = "wordpress"
+          image = "public.ecr.aws/bitnami/wordpress:latest"  # Imagem pública do ECR (WordPress)
+          port {
+            container_port = 80
+          }
+        }
+      }
+    }
+  }
+}
+
+# Criar um Service para expor o Deployment
+resource "kubernetes_service" "wordpress_service" {
+  metadata {
+    name      = "wordpress-service"
+    namespace = "default"
+  }
+
+  spec {
+    selector = {
+      app = "wordpress"
+    }
+
+    port {
+      port        = 80
+      target_port = 80
+    }
+
+    type = "LoadBalancer"  # Expondo a aplicação publicamente
+  }
+}
+
+# Obter o token para autenticação com o cluster EKS
+data "aws_eks_cluster_auth" "my_eks" {
+  name = data.aws_eks_cluster.my_eks.name
 }
